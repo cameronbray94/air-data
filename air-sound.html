@@ -71,20 +71,20 @@
 
   input[type=range] { width: 9em; max-width: 40%; accent-color: var(--c, var(--text)); margin-left: auto; }
 
-  .datastatus { margin-top: 0.9em; font-size: 0.68em; color: var(--muted); min-height: 1.3em; }
-  footer { margin-top: 0.8em; font-size: 0.62em; color: var(--muted); line-height: 1.45; }
-  footer p { margin: 0 0 0.3em; }
+  .datastatus { margin-top: 0.9em; font-size: 0.68em; color: var(--muted); }
+  .datastatus:empty { display: none; }
+  footer { margin-top: 0.9em; font-size: 0.55em; color: var(--muted); line-height: 1.45; }
 </style>
 </head>
 <body>
 <div class="wrap">
 
   <div class="seg" role="group" aria-label="How much data to use" id="windows">
-    <button type="button" data-hours="24" aria-pressed="false">Last 24 hours</button>
-    <button type="button" data-hours="168" aria-pressed="true">Last 7 days</button>
-    <button type="button" data-hours="720" aria-pressed="false">Last 30 days</button>
-    <button type="button" data-hours="4380" aria-pressed="false">Last 6 months</button>
-    <button type="button" data-hours="8760" aria-pressed="false">Last year</button>
+    <button type="button" data-hours="24" aria-pressed="false">24 hours</button>
+    <button type="button" data-hours="168" aria-pressed="true">7 days</button>
+    <button type="button" data-hours="720" aria-pressed="false">30 days</button>
+    <button type="button" data-hours="4380" aria-pressed="false">6 months</button>
+    <button type="button" data-hours="8760" aria-pressed="false">1 year</button>
   </div>
 
   <div class="playhead" id="playhead"><div class="bar"><span id="bar"></span></div><span class="now" id="now"></span></div>
@@ -124,14 +124,12 @@
     </div>
   </div>
 
-  <p class="datastatus" id="datastatus">Loading data…</p>
+  <p class="datastatus" id="datastatus">Loading…</p>
 
   <footer>
-    <p>
-      <a href="https://breathelondon.org" target="_blank" rel="noopener">Powered by Breathe London</a>.
-      Contains Breathe London data licensed under the Open Government License v3.0.
-      Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0).
-    </p>
+    <a href="https://breathelondon.org" target="_blank" rel="noopener">Powered by Breathe London</a>
+    · Contains Breathe London data licensed under the Open Government License v3.0
+    · Weather by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0)
   </footer>
 </div>
 
@@ -459,7 +457,7 @@
     }
     return true;
   }
-  audioEl.addEventListener('playing', function () { $('stream-status').textContent = 'Live'; });
+  audioEl.addEventListener('playing', function () { $('stream-status').textContent = ''; });
   audioEl.addEventListener('waiting', function () { if (state.stream) $('stream-status').textContent = 'Buffering…'; });
   audioEl.addEventListener('error', function () {
     if (!state.stream) return;
@@ -525,16 +523,12 @@
     fetchWeather(startTs, dataEnd).catch(function () { return null; })
   ]).then(function (r) {
     data = { pm25: r[0], no2: r[1], ws: r[2] && r[2].ws, wd: r[2] && r[2].wd, rain: r[2] && r[2].rain };
-    var keys = Object.keys(r[0]).concat(Object.keys(r[1])).map(Number);
-    var latest = new Date(Math.max.apply(null, keys)).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-    $('datastatus').textContent = r[2]
-      ? 'Live data connected · latest reading ' + latest
-      : 'Air quality data connected (latest reading ' + latest + '), but the weather data could not be reached, so wind and rain are unavailable.';
+    $('datastatus').textContent = r[2] ? '' : 'Weather data unavailable right now';
     ['sw-air', 'sw-play'].forEach(function (id) { $(id).disabled = false; });
     if (r[2]) { $('sw-wind').disabled = false; $('sw-rain').disabled = false; }
     recompute();
   }).catch(function () {
-    $('datastatus').textContent = 'Sorry, the air quality data could not be loaded right now. Please try again later.';
+    $('datastatus').textContent = 'Data unavailable right now';
   });
 })();
 </script>
