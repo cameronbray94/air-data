@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air quality at R-Urban Poplar</title>
+<style>
+  :root {
+    --text: rgba(0, 0, 0, 0.85);
+    --muted: rgba(0, 0, 0, 0.5);
+    --line: rgba(127, 127, 127, 0.25);
+    --link: rgb(105, 143, 255);
+    --orange: #ef8233;
+    --blue: #698fff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    color: var(--text);
+    font-size: clamp(15px, 1.2vw + 10px, 18px);
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0.25rem 0 2rem; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .meta { color: var(--muted); font-size: 0.85em; margin: 0 0 1.2em; min-height: 1.2em; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; }
+  .controls span { color: var(--muted); font-size: 0.85em; margin-right: 0.25rem; }
+  .controls button {
+    font: inherit; font-size: 0.9em; cursor: pointer;
+    padding: 0.35em 0.9em; border-radius: 999px;
+    border: 1px solid var(--text); background: transparent; color: var(--text);
+  }
+  .controls button[aria-pressed="true"] { background: var(--text); color: #fff; }
+  .controls button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+  section.pollutant { border-top: 1px solid var(--line); padding-top: 1.5rem; margin-top: 1.5rem; }
+  h2 { font-size: clamp(1.4rem, 1rem + 1.6vw, 2rem); font-weight: 600; line-height: 1.2; margin: 0 0 0.15em; }
+  .sub { color: var(--muted); margin: 0 0 1rem; font-size: 0.95em; }
+
+  .stat { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.35em 0.6em; }
+  .stat .num { font-size: clamp(2.2rem, 1.4rem + 3vw, 3.4rem); font-weight: 600; line-height: 1; }
+  .stat .unit { font-size: 1em; color: var(--muted); }
+  .stat .asof { font-size: 0.85em; color: var(--muted); }
+  .summary { margin: 0.6em 0 1rem; max-width: 60ch; }
+
+  .chartbox { position: relative; height: clamp(230px, 38vw, 340px); }
+  .chartbox .msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; color: var(--muted); padding: 1rem;
+  }
+
+  .explain { display: grid; gap: 1rem 2rem; margin-top: 1.25rem; grid-template-columns: 1fr; }
+  @media (min-width: 760px) { .explain { grid-template-columns: repeat(3, 1fr); } }
+  .explain h3 { font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; margin: 0 0 0.3em; }
+  .explain p { margin: 0; font-size: 0.95em; }
+
+  .howto { margin: 1.25rem 0 0; font-size: 0.9em; color: var(--muted); max-width: 70ch; }
+
+  footer { border-top: 1px solid var(--line); margin-top: 2rem; padding-top: 1rem; font-size: 0.8em; color: var(--muted); }
+  footer p { margin: 0 0 0.4em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="meta" id="meta"></p>
+
+  <div class="controls" role="group" aria-label="Time range">
+    <span>Show:</span>
+    <button type="button" data-hours="24" aria-pressed="false">Last 24 hours</button>
+    <button type="button" data-hours="168" aria-pressed="true">Last 7 days</button>
+    <button type="button" data-hours="720" aria-pressed="false">Last 30 days</button>
+  </div>
+
+  <div id="sections"></div>
+
+  <p class="howto">
+    <strong>How to read the charts:</strong> the thin line is each hour's reading. The thick line is the average of the
+    previous 24 hours, which smooths out the daily rhythm of traffic and weather. The dashed line is the World Health
+    Organization's guideline for a 24-hour average, so it is best compared with the thick line.
+  </p>
+
+  <footer>
+    <p>
+      <a href="https://breathelondon.org" target="_blank" rel="noopener">Powered by Breathe London</a>.
+      Contains Breathe London data licensed under the Open Government License v3.0.
+    </p>
+    <p>
+      Readings come from a low-cost sensor node that is calibrated against reference-grade monitors, so treat them as a
+      good local guide rather than an official measurement. Recent readings are provisional and there can be gaps.
+      <a id="sourcelink" href="https://www.breathelondon-communities.org/sensor-info?sitecode=CLDP0553&amp;species=both&amp;SQF_SITECODE=CLDP0553" target="_blank" rel="noopener">See this node on Breathe London</a>.
+    </p>
+  </footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+(function () {
+  // ---------------------------------------------------------------
+  // SETTINGS: change these if you need to
+  // ---------------------------------------------------------------
+  var CONFIG = {
+    apiHost: 'https://api.breathelondon-communities.org',
+    apiKey:  'a6f270c0-b753-11ec-b909-0242ac120002',
+    siteCode: 'CLDP0553',
+    defaultHours: 168   // 24, 168 (7 days) or 720 (30 days)
+  };
+
+  var POLLUTANTS = [
+    {
+      id: 'pm25',
+      species: 'IPM25',
+      title: 'PM2.5',
+      subtitle: 'Fine particles in the air',
+      color: '#ef8233',
+      guideline: 15,
+      what: 'PM2.5 means particles smaller than 2.5 micrometres, around 30 times thinner than a human hair. They are small enough to be breathed deep into the lungs and can pass into the bloodstream.',
+      where: 'Road traffic (exhaust, plus brake and tyre wear), burning wood and gas, construction and cooking. A good share also drifts in from outside London, so levels often rise across the whole city at once.',
+      level: 'There is no completely safe level, but the World Health Organization recommends staying below 5 µg/m³ on average over a year, and below 15 µg/m³ on average over any 24 hours. The dashed line shows the 24-hour guideline.'
+    },
+    {
+      id: 'no2',
+      species: 'INO2',
+      title: 'Nitrogen dioxide (NO₂)',
+      subtitle: 'A gas produced when fuel is burned',
+      color: '#698fff',
+      guideline: 25,
+      what: 'Nitrogen dioxide is a gas that irritates the airways. It can trigger asthma, and long-term exposure is linked to respiratory illness and to slower lung development in children.',
+      where: 'Mostly from burning fuel: diesel and petrol vehicles are the biggest source in cities, along with gas boilers. Levels fall off quickly with distance from roads, so they can differ a lot from one street to the next.',
+      level: 'The World Health Organization recommends below 10 µg/m³ on average over a year, and below 25 µg/m³ over any 24 hours. The UK legal limit for the yearly average is 40 µg/m³. The dashed line shows the 24-hour guideline.'
+    }
+  ];
+
+  // ---------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------
+  var HOUR = 3600 * 1000;
+  var londonFmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London', weekday: 'short', day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  });
+  function parts(ts) {
+    var o = {};
+    londonFmt.formatToParts(new Date(ts)).forEach(function (p) { o[p.type] = p.value; });
+    return o;
+  }
+  function fullLabel(ts) { var p = parts(ts); return p.weekday + ' ' + p.day + ' ' + p.month + ', ' + p.hour + ':' + p.minute; }
+  function apiDate(ts) { return encodeURIComponent(new Date(ts).toUTCString().replace(',', '')); }
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function fmt1(v) { return v.toFixed(1); }
+
+  // ---------------------------------------------------------------
+  // Build the page structure
+  // ---------------------------------------------------------------
+  var sections = document.getElementById('sections');
+  POLLUTANTS.forEach(function (p) {
+    var s = el('section', 'pollutant');
+    s.id = 'sec-' + p.id;
+    s.appendChild(el('h2', null, p.title));
+    s.appendChild(el('p', 'sub', p.subtitle));
+
+    var stat = el('div', 'stat');
+    var num = el('span', 'num', '–'); num.id = p.id + '-num';
+    stat.appendChild(num);
+    stat.appendChild(el('span', 'unit', 'µg/m³'));
+    var asof = el('span', 'asof', ''); asof.id = p.id + '-asof';
+    stat.appendChild(asof);
+    s.appendChild(stat);
+
+    var summary = el('p', 'summary', ''); summary.id = p.id + '-summary';
+    s.appendChild(summary);
+
+    var box = el('div', 'chartbox');
+    var canvas = document.createElement('canvas');
+    canvas.id = p.id + '-chart';
+    canvas.setAttribute('role', 'img');
+    canvas.setAttribute('aria-label', 'Line chart of ' + p.title + ' readings over time');
+    box.appendChild(canvas);
+    var msg = el('div', 'msg', 'Loading…'); msg.id = p.id + '-msg';
+    box.appendChild(msg);
+    s.appendChild(box);
+
+    var ex = el('div', 'explain');
+    [['What is it?', p.what], ['Where does it come from?', p.where], ['What is a healthy level?', p.level]].forEach(function (pair) {
+      var d = document.createElement('div');
+      d.appendChild(el('h3', null, pair[0]));
+      d.appendChild(el('p', null, pair[1]));
+      ex.appendChild(d);
+    });
+    s.appendChild(ex);
+    sections.appendChild(s);
+  });
+
+  // ---------------------------------------------------------------
+  // Data
+  // ---------------------------------------------------------------
+  function fetchSeries(species, startTs, endTs) {
+    var url = CONFIG.apiHost + '/api/getClarityData/' + encodeURIComponent(CONFIG.siteCode) + '/' +
+      species + '/' + apiDate(startTs) + '/' + apiDate(endTs) + '/Hourly?key=' + encodeURIComponent(CONFIG.apiKey);
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  function buildSeries(rows, hours, endTs) {
+    var map = {};
+    (rows || []).forEach(function (r) {
+      if (r.ScaledValue !== null && r.ScaledValue !== undefined) map[Date.parse(r.DateTime)] = r.ScaledValue;
+    });
+    var startTs = endTs - hours * HOUR;
+    var times = [], hourly = [], rolling = [];
+    for (var t = startTs; t <= endTs; t += HOUR) {
+      times.push(t);
+      hourly.push(map[t] !== undefined ? map[t] : null);
+      var sum = 0, n = 0;
+      for (var k = 0; k < 24; k++) {
+        var v = map[t - k * HOUR];
+        if (v !== undefined) { sum += v; n++; }
+      }
+      rolling.push(n >= 18 ? sum / n : null);
+    }
+    return { times: times, hourly: hourly, rolling: rolling };
+  }
+
+  function tickLabels(times, hours) {
+    var labels = times.map(function () { return ''; });
+    if (hours <= 24) {
+      times.forEach(function (t, i) {
+        if (i % 4 === 0) { var p = parts(t); labels[i] = p.hour + ':' + p.minute; }
+      });
+    } else {
+      var mids = [];
+      times.forEach(function (t, i) { if (parts(t).hour === '00') mids.push(i); });
+      var every = hours > 200 ? 5 : 1;
+      mids.forEach(function (i, j) {
+        if (j % every === 0) { var p = parts(times[i]); labels[i] = p.day + ' ' + p.month; }
+      });
+    }
+    return labels;
+  }
+
+  // ---------------------------------------------------------------
+  // Rendering
+  // ---------------------------------------------------------------
+  var charts = {};
+  var currentHours = CONFIG.defaultHours;
+  var requestId = 0;
+
+  function showMessage(p, text) {
+    var m = document.getElementById(p.id + '-msg');
+    m.textContent = text || '';
+    m.style.display = text ? 'flex' : 'none';
+  }
+
+  function render(p, series, hours) {
+    var lastIdx = -1;
+    for (var i = series.hourly.length - 1; i >= 0; i--) { if (series.hourly[i] !== null) { lastIdx = i; break; } }
+
+    var numEl = document.getElementById(p.id + '-num');
+    var asofEl = document.getElementById(p.id + '-asof');
+    var sumEl = document.getElementById(p.id + '-summary');
+
+    if (lastIdx < 0) {
+      numEl.textContent = '–'; asofEl.textContent = ''; sumEl.textContent = '';
+      if (charts[p.id]) { charts[p.id].destroy(); delete charts[p.id]; }
+      showMessage(p, 'No readings available for this period.');
+      return;
+    }
+    showMessage(p, '');
+
+    numEl.textContent = fmt1(series.hourly[lastIdx]);
+    asofEl.textContent = 'latest hourly reading, ' + fullLabel(series.times[lastIdx]);
+
+    var avg = series.rolling[lastIdx];
+    if (avg === null) {
+      for (var j = lastIdx; j >= 0; j--) { if (series.rolling[j] !== null) { avg = series.rolling[j]; break; } }
+    }
+    if (avg !== null) {
+      var ratio = avg / p.guideline;
+      var tail;
+      if (avg <= p.guideline) tail = 'That is within the WHO 24-hour guideline of ' + p.guideline + ' µg/m³.';
+      else if (ratio < 1.15) tail = 'That is slightly above the WHO 24-hour guideline of ' + p.guideline + ' µg/m³.';
+      else tail = 'That is about ' + fmt1(ratio) + ' times the WHO 24-hour guideline of ' + p.guideline + ' µg/m³.';
+      sumEl.textContent = 'Average over the 24 hours to this reading: ' + fmt1(avg) + ' µg/m³. ' + tail;
+    } else {
+      sumEl.textContent = '';
+    }
+
+    var labels = series.times.map(fullLabel);
+    var ticks = tickLabels(series.times, hours);
+    var guide = series.times.map(function () { return p.guideline; });
+    var maxVal = Math.max.apply(null, series.hourly.filter(function (v) { return v !== null; }).concat([p.guideline]));
+
+    if (charts[p.id]) charts[p.id].destroy();
+    charts[p.id] = new Chart(document.getElementById(p.id + '-chart'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: 'Hourly reading', data: series.hourly, borderColor: p.color + '99', backgroundColor: p.color + '99',
+            borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 4, spanGaps: false },
+          { label: '24-hour average', data: series.rolling, borderColor: p.color, backgroundColor: p.color,
+            borderWidth: 3.5, pointRadius: 0, pointHoverRadius: 4, spanGaps: false },
+          { label: 'WHO 24-hour guideline', data: guide, borderColor: 'rgba(0,0,0,0.55)', backgroundColor: 'rgba(0,0,0,0.55)',
+            borderWidth: 1.5, borderDash: [6, 6], pointRadius: 0, pointHoverRadius: 0 }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 18, boxHeight: 3, font: { size: 12 } } },
+          tooltip: {
+            filter: function (item) { return item.parsed.y !== null; },
+            callbacks: {
+              label: function (ctx) { return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1) + ' µg/m³'; }
+            }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { autoSkip: false, maxRotation: 0, font: { size: 12 },
+                     callback: function (value, index) { return ticks[index]; } }
+          },
+          y: {
+            beginAtZero: true,
+            suggestedMax: Math.ceil(maxVal * 1.1),
+            title: { display: true, text: 'µg/m³', font: { size: 12 } },
+            grid: { color: 'rgba(127,127,127,0.18)' },
+            ticks: { font: { size: 12 } }
+          }
+        }
+      }
+    });
+  }
+
+  function load(hours) {
+    currentHours = hours;
+    var myRequest = ++requestId;
+    document.querySelectorAll('.controls button').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(Number(b.getAttribute('data-hours')) === hours));
+    });
+
+    var endTs = Math.floor(Date.now() / HOUR) * HOUR;
+    var startTs = endTs - (hours + 24) * HOUR;   // 24 extra hours so the 24-hour average is complete from the start
+
+    POLLUTANTS.forEach(function (p) {
+      showMessage(p, 'Loading…');
+      fetchSeries(p.species, startTs, endTs).then(function (rows) {
+        if (myRequest !== requestId) return;
+        render(p, buildSeries(rows, hours, endTs), hours);
+      }).catch(function () {
+        if (myRequest !== requestId) return;
+        showMessage(p, 'Sorry, the readings could not be loaded right now. Please try again later or see the link below.');
+      });
+    });
+  }
+
+  document.querySelectorAll('.controls button').forEach(function (b) {
+    b.addEventListener('click', function () { load(Number(b.getAttribute('data-hours'))); });
+  });
+
+  // Small line about the sensor itself
+  fetch(CONFIG.apiHost + '/api/Sensor/' + encodeURIComponent(CONFIG.siteCode) + '?key=' + encodeURIComponent(CONFIG.apiKey))
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(); })
+    .then(function (s) {
+      var bits = [];
+      if (s.SiteName) bits.push('Sensor node: ' + s.SiteName);
+      if (s.HeadHeight && s.ToRoad) bits.push('mounted ' + s.HeadHeight + ' m above the ground, ' + s.ToRoad + ' m from the nearest road');
+      document.getElementById('meta').textContent = bits.join(' · ');
+    })
+    .catch(function () {});
+
+  load(currentHours);
+})();
+</script>
+</body>
+</html>

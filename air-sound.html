@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Listen to the air at R-Urban Poplar</title>
+<style>
+  :root {
+    --text: rgba(0, 0, 0, 0.85);
+    --muted: rgba(0, 0, 0, 0.45);
+    --line: rgba(127, 127, 127, 0.25);
+    --orange: #ee8331;
+    --green: #94f94b;
+    --link: rgb(105, 143, 255);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    font-weight: 400;
+    font-style: normal;
+    color: var(--text);
+    font-size: clamp(18px, 1.3vw + 11px, 26px);
+    line-height: 1.3;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 900px; padding: 0.1rem 0 1.5rem; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Pill buttons */
+  .seg { display: flex; flex-wrap: wrap; gap: 0.45em; }
+  .seg button {
+    font: inherit; font-size: 0.78em; cursor: pointer;
+    padding: 0.3em 0.85em; border-radius: 999px;
+    border: 1px solid var(--text); background: transparent; color: var(--text);
+  }
+  .seg button:hover { background: rgba(0, 0, 0, 0.06); }
+  .seg button[aria-pressed="true"] { background: var(--green); border-color: var(--text); }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+
+  /* Progress while playing through time */
+  .playhead { height: 1.6em; margin: 0.9em 0 0.2em; display: flex; align-items: center; gap: 0.8em; visibility: hidden; }
+  .playhead.on { visibility: visible; }
+  .playhead .bar { flex: 1; max-width: 340px; height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .playhead .bar span { display: block; height: 100%; width: 0; background: var(--orange); }
+  .playhead .now { font-size: 0.7em; color: var(--muted); white-space: nowrap; }
+
+  /* Rows of toggles */
+  .rows { margin-top: 0.4em; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3em 0.9em; padding: 0.55em 0; border-top: 1px solid var(--line); }
+  .row:last-child { border-bottom: 1px solid var(--line); }
+  .row .name { min-width: 7.5em; }
+  .row .status { font-size: 0.7em; color: var(--muted); }
+  .row .extra { flex-basis: 100%; padding-left: 3.5em; }
+  .row.green { --c: var(--green); }
+  .row.orange { --c: var(--orange); }
+
+  .switch {
+    position: relative; width: 2.6em; height: 1.45em; flex: none;
+    border-radius: 999px; border: 0; padding: 0; cursor: pointer;
+    background: rgba(127, 127, 127, 0.35); transition: background 0.2s;
+  }
+  .switch span {
+    position: absolute; top: 0.17em; left: 0.17em; width: 1.11em; height: 1.11em;
+    border-radius: 50%; background: #fff; transition: transform 0.2s; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  }
+  .switch[aria-checked="true"] { background: var(--c); }
+  .switch[aria-checked="true"] span { transform: translateX(1.15em); }
+  .switch:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  input[type=range] { width: 9em; max-width: 40%; accent-color: var(--c, var(--text)); margin-left: auto; }
+
+  .datastatus { margin-top: 0.9em; font-size: 0.68em; color: var(--muted); min-height: 1.3em; }
+  footer { margin-top: 0.8em; font-size: 0.62em; color: var(--muted); line-height: 1.45; }
+  footer p { margin: 0 0 0.3em; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="seg" role="group" aria-label="How much data to use" id="windows">
+    <button type="button" data-hours="24" aria-pressed="false">Last 24 hours</button>
+    <button type="button" data-hours="168" aria-pressed="true">Last 7 days</button>
+    <button type="button" data-hours="720" aria-pressed="false">Last 30 days</button>
+    <button type="button" data-hours="4380" aria-pressed="false">Last 6 months</button>
+    <button type="button" data-hours="8760" aria-pressed="false">Last year</button>
+  </div>
+
+  <div class="playhead" id="playhead"><div class="bar"><span id="bar"></span></div><span class="now" id="now"></span></div>
+
+  <div class="rows">
+    <div class="row green">
+      <button type="button" class="switch" role="switch" aria-checked="false" id="sw-stream" aria-labelledby="n-stream"><span></span></button>
+      <span class="name" id="n-stream">Live audio</span>
+      <span class="status" id="stream-status"></span>
+      <input type="range" id="vol-stream" min="0" max="1" step="0.01" value="0.8" aria-label="Live audio volume">
+    </div>
+
+    <div class="row orange">
+      <button type="button" class="switch" role="switch" aria-checked="false" id="sw-air" aria-labelledby="n-air" disabled><span></span></button>
+      <span class="name" id="n-air">Air quality</span>
+      <input type="range" id="vol-synth" min="0" max="1" step="0.01" value="0.6" aria-label="Synth volume">
+      <div class="extra seg" role="group" aria-label="Which pollutant" id="modes">
+        <button type="button" data-mode="both" aria-pressed="true">PM2.5 + NO₂</button>
+        <button type="button" data-mode="pm25" aria-pressed="false">PM2.5</button>
+        <button type="button" data-mode="no2" aria-pressed="false">NO₂</button>
+      </div>
+    </div>
+
+    <div class="row green">
+      <button type="button" class="switch" role="switch" aria-checked="false" id="sw-wind" aria-labelledby="n-wind" disabled><span></span></button>
+      <span class="name" id="n-wind">Wind</span>
+    </div>
+
+    <div class="row orange">
+      <button type="button" class="switch" role="switch" aria-checked="false" id="sw-rain" aria-labelledby="n-rain" disabled><span></span></button>
+      <span class="name" id="n-rain">Rain</span>
+    </div>
+
+    <div class="row green">
+      <button type="button" class="switch" role="switch" aria-checked="false" id="sw-play" aria-labelledby="n-play" disabled><span></span></button>
+      <span class="name" id="n-play">Play through time</span>
+    </div>
+  </div>
+
+  <p class="datastatus" id="datastatus">Loading data…</p>
+
+  <footer>
+    <p>
+      <a href="https://breathelondon.org" target="_blank" rel="noopener">Powered by Breathe London</a>.
+      Contains Breathe London data licensed under the Open Government License v3.0.
+      Weather data by <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo.com</a> (CC BY 4.0).
+    </p>
+  </footer>
+</div>
+
+<audio id="stream" preload="none"></audio>
+
+<script>
+(function () {
+  // ---------------------------------------------------------------
+  // SETTINGS
+  // ---------------------------------------------------------------
+  var CONFIG = {
+    streamUrl: 'https://locus.creacast.com:9443/r-urban_poplar.mp3',
+
+    apiHost:  'https://api.breathelondon-communities.org',
+    apiKey:   'a6f270c0-b753-11ec-b909-0242ac120002',
+    siteCode: 'CLDP0553',
+
+    // Location used for the weather (the sensor's position in Poplar)
+    lat: 51.5174,
+    lon: -0.0101,
+
+    defaultHours: 168,
+
+    // How the data becomes sound
+    pm25Max: 15,            // PM2.5 (µg/m³) that counts as "very high" for the tone (the WHO 24-hour guideline)
+    no2Max: 40,             // NO2 (µg/m³) that counts as "very high" for the tone (the UK legal yearly limit)
+    lowHz: 65,              // lowest note of the tone (about C2)
+    octaves: 5,             // pitch range of the tone, in octaves (more octaves = bigger changes in pitch)
+    filterSpanCents: 3400,  // how far the wind filter can open: from 1.5x the note up by this many cents (about 2.8 octaves)
+    rainRefMmPerHour: 0.15, // average rain rate (mm/hour) that counts as "very wet"
+    playSeconds: 40         // how long "Play through time" takes to travel through the chosen period
+  };
+
+  // ---------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------
+  var HOUR = 3600 * 1000, DAY = 24 * HOUR;
+  function $(id) { return document.getElementById(id); }
+  function clamp(x, a, b) { return Math.min(b, Math.max(a, x)); }
+  function mean(arr) { return arr.length ? arr.reduce(function (s, v) { return s + v; }, 0) / arr.length : null; }
+  function isoDate(ts) { return new Date(ts).toISOString().slice(0, 10); }
+  function apiDate(ts) { return encodeURIComponent(new Date(ts).toUTCString().replace(',', '')); }
+  function interp(arr, pos) {
+    if (!arr) return null;
+    var lo = Math.floor(pos), hi = Math.min(arr.length - 1, lo + 1);
+    return arr[lo] + (arr[hi] - arr[lo]) * (pos - lo);
+  }
+
+  // ---------------------------------------------------------------
+  // State
+  // ---------------------------------------------------------------
+  var state = { stream: false, air: false, wind: false, rain: false, play: false,
+                hours: CONFIG.defaultHours, mode: 'both' };
+  var data = null, stats = null;
+  var dataEnd = Math.floor(Date.now() / HOUR) * HOUR;
+
+  // ---------------------------------------------------------------
+  // Fetching data
+  // ---------------------------------------------------------------
+  function fetchAQ(species, startTs, endTs) {
+    var url = CONFIG.apiHost + '/api/getClarityData/' + encodeURIComponent(CONFIG.siteCode) + '/' + species + '/' +
+      apiDate(startTs) + '/' + apiDate(endTs) + '/Hourly?key=' + encodeURIComponent(CONFIG.apiKey);
+    return fetch(url).then(function (r) { if (!r.ok) throw new Error('AQ ' + r.status); return r.json(); })
+      .then(function (rows) {
+        var m = {};
+        rows.forEach(function (r) { if (r.ScaledValue !== null && r.ScaledValue !== undefined) m[Date.parse(r.DateTime)] = r.ScaledValue; });
+        return m;
+      });
+  }
+
+  function addWeather(json, maps) {
+    var h = json.hourly;
+    for (var i = 0; i < h.time.length; i++) {
+      var ts = Date.parse(h.time[i] + 'Z');
+      if (h.wind_speed_10m[i] !== null) maps.ws[ts] = h.wind_speed_10m[i];
+      if (h.wind_direction_10m[i] !== null) maps.wd[ts] = h.wind_direction_10m[i];
+      if (h.precipitation[i] !== null) maps.rain[ts] = h.precipitation[i];
+    }
+  }
+
+  function fetchWeather(startTs, endTs) {
+    var q = '&latitude=' + CONFIG.lat + '&longitude=' + CONFIG.lon +
+            '&hourly=wind_speed_10m,wind_direction_10m,precipitation&wind_speed_unit=ms&timezone=UTC';
+    var maps = { ws: {}, wd: {}, rain: {} };
+    function get(url) { return fetch(url).then(function (r) { if (!r.ok) throw new Error('WX ' + r.status); return r.json(); }); }
+    // Older history comes from the archive (which runs a few days behind); the last days come from the forecast service.
+    var archive = get('https://archive-api.open-meteo.com/v1/archive?start_date=' + isoDate(startTs) +
+                      '&end_date=' + isoDate(endTs - 8 * DAY) + q).then(function (j) { addWeather(j, maps); return true; }).catch(function () { return false; });
+    var recent = get('https://api.open-meteo.com/v1/forecast?past_days=9&forecast_days=1' + q)
+                      .then(function (j) { addWeather(j, maps); return true; }).catch(function () { return false; });
+    return Promise.all([archive, recent]).then(function (ok) {
+      if (!ok[0] && !ok[1]) throw new Error('No weather data');
+      return maps;
+    });
+  }
+
+  // ---------------------------------------------------------------
+  // Turning a time window into numbers
+  // ---------------------------------------------------------------
+  function resample(series, N) {
+    // fill gaps with straight lines, then shrink (by averaging) or stretch to N points
+    var n = series.length, first = -1, i;
+    for (i = 0; i < n; i++) if (series[i] !== null) { first = i; break; }
+    if (first < 0) return null;
+    var filled = series.slice(), lastKnown = first;
+    for (i = 0; i < first; i++) filled[i] = series[first];
+    for (i = first + 1; i < n; i++) {
+      if (filled[i] === null) {
+        var j = i; while (j < n && series[j] === null) j++;
+        if (j >= n) { for (var k = i; k < n; k++) filled[k] = series[lastKnown]; break; }
+        for (var k2 = i; k2 < j; k2++) filled[k2] = series[lastKnown] + (series[j] - series[lastKnown]) * (k2 - lastKnown) / (j - lastKnown);
+        i = j - 1;
+      } else lastKnown = i;
+    }
+    var out = new Array(N), p;
+    for (p = 0; p < N; p++) {
+      if (n >= N) {
+        var a = Math.floor(p * n / N), b = Math.max(a + 1, Math.floor((p + 1) * n / N)), s = 0;
+        for (var x = a; x < b; x++) s += filled[x];
+        out[p] = s / (b - a);
+      } else {
+        var pos = p * (n - 1) / (N - 1), lo = Math.floor(pos), hi = Math.min(n - 1, lo + 1);
+        out[p] = filled[lo] + (filled[hi] - filled[lo]) * (pos - lo);
+      }
+    }
+    return out;
+  }
+
+  function computeStats(hours) {
+    var pm = [], no2 = [], ws = [], rain = [], sinSum = 0, cosSum = 0, wdCount = 0;
+    var pmH = [], no2H = [], wsH = [], rainH = [], openH = [];
+    for (var i = 0; i < hours; i++) {
+      var t = dataEnd - (hours - 1 - i) * HOUR;
+      var vPm = data.pm25[t], vNo2 = data.no2[t];
+      var vWs = data.ws ? data.ws[t] : undefined, vRain = data.rain ? data.rain[t] : undefined, vWd = data.wd ? data.wd[t] : undefined;
+      pmH.push(vPm !== undefined ? vPm : null); if (vPm !== undefined) pm.push(vPm);
+      no2H.push(vNo2 !== undefined ? vNo2 : null); if (vNo2 !== undefined) no2.push(vNo2);
+      wsH.push(vWs !== undefined ? vWs : null); if (vWs !== undefined) ws.push(vWs);
+      rainH.push(vRain !== undefined ? vRain : null); if (vRain !== undefined) rain.push(vRain);
+      if (vWd !== undefined) {
+        var r = vWd * Math.PI / 180;
+        sinSum += Math.sin(r); cosSum += Math.cos(r); wdCount++;
+        // 0 = filter closed (wind from the west, 270°), 1 = filter open (wind from the east, 90°)
+        openH.push(0.5 - 0.5 * Math.cos((vWd - 270) * Math.PI / 180));
+      } else openH.push(null);
+    }
+    var s = { hours: hours, pm: mean(pm), no2: mean(no2), ws: mean(ws), rainRate: null, open: null, shape: null, series: null };
+    if (rain.length) s.rainRate = rain.reduce(function (a, b) { return a + b; }, 0) / rain.length;
+    if (wdCount) {
+      s.open = mean(openH.filter(function (v) { return v !== null; }));
+      s.shape = resample(openH, 256);
+    }
+    var N = Math.min(hours, 240);
+    s.series = { N: N, pm: resample(pmH, N), no2: resample(no2H, N), ws: resample(wsH, N),
+                 open: resample(openH, N), rain: resample(rainH, N) };
+    return s;
+  }
+
+  function levelFrom(pm, no2) {
+    var a = pm !== null ? clamp(pm / CONFIG.pm25Max, 0, 1) : null;
+    var b = no2 !== null ? clamp(no2 / CONFIG.no2Max, 0, 1) : null;
+    if (state.mode === 'pm25') return a;
+    if (state.mode === 'no2') return b;
+    var vals = [a, b].filter(function (v) { return v !== null; });
+    return vals.length ? mean(vals) : null;
+  }
+  function pitchFor(level) { return CONFIG.lowHz * Math.pow(2, CONFIG.octaves * level); }
+  function lfoRate(ws) { return clamp(0.1 * Math.pow(2, 0.4 * ws), 0.05, 8); }   // wind speed (m/s) -> sweep speed (Hz)
+  function rainAmount(rate) { return clamp(Math.sqrt(Math.max(rate, 0) / CONFIG.rainRefMmPerHour), 0, 1); }
+  function loudnessFor(f0) { return clamp(Math.sqrt(220 / f0), 0.3, 1.3); }   // keep high notes from being piercing
+
+  // ---------------------------------------------------------------
+  // Audio engine (Web Audio)
+  // ---------------------------------------------------------------
+  var ctx = null, A = {}, tickTimer = null, playT0 = 0, lastNowText = '';
+  var CLOSED = 1.5, SPAN = CONFIG.filterSpanCents;
+
+  function initAudio() {
+    if (ctx) return;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+
+    A.master = ctx.createGain(); A.master.gain.value = 0.35 * parseFloat($('vol-synth').value);
+    A.comp = ctx.createDynamicsCompressor();
+    A.synth = ctx.createGain(); A.synth.gain.value = 0;
+    A.mix = ctx.createGain(); A.mix.gain.value = 0.5;
+    A.pitchGain = ctx.createGain(); A.pitchGain.gain.value = 1;
+
+    A.o1 = ctx.createOscillator(); A.o1.type = 'sawtooth';
+    A.o2 = ctx.createOscillator(); A.o2.type = 'sawtooth'; A.o2.detune.value = 7;
+    A.o3 = ctx.createOscillator(); A.o3.type = 'triangle';          // sub octave
+    var g1 = ctx.createGain(), g2 = ctx.createGain(), g3 = ctx.createGain();
+    g1.gain.value = 0.5; g2.gain.value = 0.5; g3.gain.value = 0.6;
+    A.o1.connect(g1); A.o2.connect(g2); A.o3.connect(g3);
+    g1.connect(A.mix); g2.connect(A.mix); g3.connect(A.mix);
+
+    // Wind: low-pass filter whose cutoff (in cents) is moved by the wind data
+    A.wind = ctx.createBiquadFilter(); A.wind.type = 'lowpass'; A.wind.Q.value = 3;
+    A.lfo = ctx.createOscillator(); A.lfo.frequency.value = 0.2;
+    A.lfoDepth = ctx.createGain(); A.lfoDepth.gain.value = 0;
+    A.lfo.connect(A.lfoDepth); A.lfoDepth.connect(A.wind.detune);
+
+    // Rain: high-pass filter
+    A.rain = ctx.createBiquadFilter(); A.rain.type = 'highpass'; A.rain.frequency.value = 20; A.rain.Q.value = 0.7;
+
+    A.mix.connect(A.pitchGain); A.pitchGain.connect(A.wind); A.wind.connect(A.rain); A.rain.connect(A.synth);
+    A.synth.connect(A.master); A.master.connect(A.comp); A.comp.connect(ctx.destination);
+    A.analyser = ctx.createAnalyser(); A.analyser.fftSize = 8192; A.master.connect(A.analyser);
+
+    A.o1.start(); A.o2.start(); A.o3.start(); A.lfo.start();
+    window.__sonify = { ctx: ctx, nodes: A, state: state };   // handy for debugging in the browser console
+    applyAudio(true);
+  }
+
+  function makeWave(shape) {
+    // shape: 256 values between 0 and 1 -> a smooth looping wave (forwards then backwards, so there is no jump)
+    var m = mean(shape), half = shape.map(function (v) { return v - m; });
+    var w = half.concat(half.slice().reverse()), M = w.length, H = 40;
+    var real = new Float32Array(H + 1), imag = new Float32Array(H + 1);
+    for (var k = 1; k <= H; k++) {
+      var c = 0, s = 0;
+      for (var n = 0; n < M; n++) { var ang = 2 * Math.PI * k * n / M; c += w[n] * Math.cos(ang); s += w[n] * Math.sin(ang); }
+      real[k] = 2 * c / M; imag[k] = 2 * s / M;
+    }
+    return ctx.createPeriodicWave(real, imag, { disableNormalization: true });
+  }
+
+  function set(param, v, tc) { param.setTargetAtTime(v, ctx.currentTime, tc); }
+
+  // One average for the whole period
+  function averageSound(tc) {
+    var level = levelFrom(stats.pm, stats.no2);
+    var f0 = pitchFor(level === null ? 0.3 : level);
+    set(A.o1.frequency, f0, tc); set(A.o2.frequency, f0, tc); set(A.o3.frequency, f0 / 2, tc);
+    set(A.pitchGain.gain, loudnessFor(f0), tc);
+
+    var windOn = state.wind && stats.shape;
+    set(A.wind.frequency, f0 * CLOSED, tc);
+    set(A.wind.detune, (windOn ? stats.open : 0.8) * SPAN, 0.4);
+    if (windOn) {
+      A.lfo.setPeriodicWave(makeWave(stats.shape));
+      set(A.lfo.frequency, lfoRate(stats.ws === null ? 3 : stats.ws), 0.3);
+    }
+    set(A.lfoDepth.gain, windOn ? SPAN : 0, 0.4);
+
+    var R = (state.rain && stats.rainRate !== null) ? rainAmount(stats.rainRate) : 0;
+    set(A.rain.frequency, 20 * Math.pow((f0 * 3) / 20, R), 0.4);
+    set(A.rain.Q, 0.7 + 2 * R, 0.4);
+  }
+
+  // Travelling through the period, hour by hour (or day by day for long periods)
+  function nowText(p) {
+    var t = dataEnd - (1 - p) * state.hours * HOUR;
+    var opts = state.hours <= 168
+      ? { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }
+      : { day: 'numeric', month: 'short', year: 'numeric' };
+    opts.timeZone = 'Europe/London';
+    return new Date(t).toLocaleString('en-GB', opts);
+  }
+
+  function tick() {
+    if (!ctx || !stats || !state.play) return;
+    var S = stats.series, p = ((ctx.currentTime - playT0) / CONFIG.playSeconds) % 1;
+    var pos = p * (S.N - 1), tc = 0.08;
+
+    var level = levelFrom(S.pm ? interp(S.pm, pos) : null, S.no2 ? interp(S.no2, pos) : null);
+    var f0 = pitchFor(level === null ? 0.3 : level);
+    set(A.o1.frequency, f0, tc); set(A.o2.frequency, f0, tc); set(A.o3.frequency, f0 / 2, tc);
+    set(A.pitchGain.gain, loudnessFor(f0), tc);
+    set(A.wind.frequency, f0 * CLOSED, tc);
+
+    if (state.wind && S.open) {
+      set(A.wind.detune, interp(S.open, pos) * SPAN, 0.15);
+      set(A.lfoDepth.gain, 0.12 * SPAN, 0.3);
+      set(A.lfo.frequency, lfoRate(S.ws ? interp(S.ws, pos) : 3), 0.3);
+    } else {
+      set(A.wind.detune, 0.8 * SPAN, 0.3);
+      set(A.lfoDepth.gain, 0, 0.3);
+    }
+
+    var R = (state.rain && S.rain) ? rainAmount(interp(S.rain, pos)) : 0;
+    set(A.rain.frequency, 20 * Math.pow((f0 * 3) / 20, R), 0.15);
+    set(A.rain.Q, 0.7 + 2 * R, 0.15);
+
+    $('bar').style.width = (p * 100).toFixed(1) + '%';
+    var txt = nowText(p);
+    if (txt !== lastNowText) { $('now').textContent = txt; lastNowText = txt; }
+  }
+
+  function startTick() { if (!tickTimer) { playT0 = ctx.currentTime; tickTimer = setInterval(tick, 50); } }
+  function stopTick() { if (tickTimer) { clearInterval(tickTimer); tickTimer = null; } }
+
+  function applyAudio(immediate) {
+    if (!ctx || !stats) return;
+    var hasData = levelFrom(stats.pm, stats.no2) !== null;
+    set(A.synth.gain, state.air && hasData ? 1 : 0, 0.25);
+    if (state.play) {
+      A.lfo.type = 'sine';
+      startTick(); tick();
+    } else {
+      stopTick();
+      averageSound(immediate ? 0.01 : 0.5);
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Live stream
+  // ---------------------------------------------------------------
+  var audioEl = $('stream');
+  function setStream(on) {
+    var status = $('stream-status');
+    if (on) {
+      if (!CONFIG.streamUrl) { status.textContent = 'No stream address yet'; return false; }
+      audioEl.src = CONFIG.streamUrl;
+      audioEl.volume = parseFloat($('vol-stream').value);
+      status.textContent = 'Connecting…';
+      var p = audioEl.play();
+      if (p && p.catch) p.catch(function () {
+        status.textContent = 'Could not start';
+        state.stream = false; setSwitch('sw-stream', false);
+      });
+    } else {
+      audioEl.pause(); audioEl.removeAttribute('src'); audioEl.load();
+      status.textContent = '';
+    }
+    return true;
+  }
+  audioEl.addEventListener('playing', function () { $('stream-status').textContent = 'Live'; });
+  audioEl.addEventListener('waiting', function () { if (state.stream) $('stream-status').textContent = 'Buffering…'; });
+  audioEl.addEventListener('error', function () {
+    if (!state.stream) return;
+    $('stream-status').textContent = 'Stream unavailable';
+    state.stream = false; setSwitch('sw-stream', false);
+  });
+
+  // ---------------------------------------------------------------
+  // Interface
+  // ---------------------------------------------------------------
+  function setSwitch(id, on) { $(id).setAttribute('aria-checked', String(on)); }
+  function showPlayhead() {
+    $('playhead').classList.toggle('on', state.play);
+    if (!state.play) { $('bar').style.width = '0'; $('now').textContent = ''; lastNowText = ''; }
+  }
+
+  function recompute() {
+    if (!data) return;
+    stats = computeStats(state.hours);
+    if (ctx) { stopTick(); applyAudio(false); }   // restarts play-through from the beginning of the new period
+  }
+
+  $('windows').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-hours]'); if (!b) return;
+    state.hours = Number(b.getAttribute('data-hours'));
+    Array.prototype.forEach.call($('windows').querySelectorAll('button'), function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    recompute();
+  });
+  $('modes').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-mode]'); if (!b) return;
+    state.mode = b.getAttribute('data-mode');
+    Array.prototype.forEach.call($('modes').querySelectorAll('button'), function (x) { x.setAttribute('aria-pressed', String(x === b)); });
+    if (ctx && stats) applyAudio(false);
+  });
+
+  ['stream', 'air', 'wind', 'rain', 'play'].forEach(function (key) {
+    $('sw-' + key).addEventListener('click', function () {
+      var next = !state[key];
+      if (key === 'stream') {
+        if (!setStream(next)) return;
+      } else if (key !== 'play') {
+        initAudio();
+        if (ctx.state === 'suspended') ctx.resume();
+      } else if (ctx && ctx.state === 'suspended') ctx.resume();
+      state[key] = next; setSwitch('sw-' + key, next);
+      if (key === 'play') showPlayhead();
+      if (key !== 'stream' && ctx && stats) applyAudio(false);
+    });
+  });
+
+  $('vol-synth').addEventListener('input', function (e) {
+    if (ctx) A.master.gain.setTargetAtTime(0.35 * parseFloat(e.target.value), ctx.currentTime, 0.05);
+  });
+  $('vol-stream').addEventListener('input', function (e) { audioEl.volume = parseFloat(e.target.value); });
+
+  // ---------------------------------------------------------------
+  // Load everything
+  // ---------------------------------------------------------------
+  var startTs = dataEnd - 8760 * HOUR - DAY;
+  Promise.all([
+    fetchAQ('IPM25', startTs, dataEnd),
+    fetchAQ('INO2', startTs, dataEnd),
+    fetchWeather(startTs, dataEnd).catch(function () { return null; })
+  ]).then(function (r) {
+    data = { pm25: r[0], no2: r[1], ws: r[2] && r[2].ws, wd: r[2] && r[2].wd, rain: r[2] && r[2].rain };
+    var keys = Object.keys(r[0]).concat(Object.keys(r[1])).map(Number);
+    var latest = new Date(Math.max.apply(null, keys)).toLocaleString('en-GB', { timeZone: 'Europe/London', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    $('datastatus').textContent = r[2]
+      ? 'Live data connected · latest reading ' + latest
+      : 'Air quality data connected (latest reading ' + latest + '), but the weather data could not be reached, so wind and rain are unavailable.';
+    ['sw-air', 'sw-play'].forEach(function (id) { $(id).disabled = false; });
+    if (r[2]) { $('sw-wind').disabled = false; $('sw-rain').disabled = false; }
+    recompute();
+  }).catch(function () {
+    $('datastatus').textContent = 'Sorry, the air quality data could not be loaded right now. Please try again later.';
+  });
+})();
+</script>
+</body>
+</html>
